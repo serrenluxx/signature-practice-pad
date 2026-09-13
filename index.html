@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Signature Practice Pad</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background-color: #c9c6bc;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    font-family: system-ui, -apple-system, sans-serif;
+    user-select: none;
+    overflow: hidden;
+  }
+  .toolbar {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+    z-index: 10;
+  }
+  button {
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid #7a7d81;
+    border-radius: 5px;
+    background-color: #9c9fa4;
+    color: #1a1a1a;
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    transition: background 0.15s ease;
+  }
+  button:hover { background-color: #888b90; }
+  button.active {
+    background-color: #2b3a4a;
+    color: #ffffff;
+    border-color: #1a2530;
+  }
+  .viewport {
+    width: 820px;
+    height: 470px;
+    overflow: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #b5b2a6;
+    border-radius: 6px;
+    box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
+  }
+  .canvas-wrapper {
+    transform-origin: center center;
+    transition: transform 0.1s ease-out;
+  }
+  canvas {
+    background-color: #d8d6d0;
+    display: block;
+    cursor: crosshair;
+    touch-action: none;
+    box-shadow: 0 4px 10px rgba(0,0,0,0.2);
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button id="penBtn" class="active">Pen</button>
+  <button id="eraserBtn">Eraser</button>
+  <button id="undoBtn">Undo (Ctrl+Z)</button>
+  <button id="clearBtn">Clear (Delete)</button>
+  <button id="zoomInBtn">Zoom In (+)</button>
+  <button id="zoomOutBtn">Zoom Out (-)</button>
+  <button id="zoomResetBtn">100%</button>
+</div>
+
+<div class="viewport">
+  <div class="canvas-wrapper" id="canvasWrapper">
+    <canvas id="board" width="800" height="450"></canvas>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('board');
+  const wrapper = document.getElementById('canvasWrapper');
+  const ctx = canvas.getContext('2d');
+
+  const penBtn = document.getElementById('penBtn');
+  const eraserBtn = document.getElementById('eraserBtn');
+  const undoBtn = document.getElementById('undoBtn');
+  const clearBtn = document.getElementById('clearBtn');
+  const zoomInBtn = document.getElementById('zoomInBtn');
+  const zoomOutBtn = document.getElementById('zoomOutBtn');
+  const zoomResetBtn = document.getElementById('zoomResetBtn');
+
+  const PAPER_COLOR = '#f4f1ea';
+  const PEN_COLOR = '#003399';
+  const BASE_PEN_WIDTH = 2.5;
+  const ERASER_WIDTH = 24;
+
+  let isDrawing = false;
+  let mode = 'pen';
+  let history = [];
+  let currentZoom = 1.0;
+  let points = [];
+  let currentWidth = BASE_PEN_WIDTH;
+
+  function setZoom(scale) {
+    currentZoom = Math.min(Math.max(scale, 0.5), 3.0);
+    wrapper.style.transform = `scale(${currentZoom})`;
+    zoomResetBtn.textContent = `${Math.round(currentZoom * 100)}%`;
+  }
+
+  function saveState() {
+    if (history.length >= 25) history.shift();
+    history.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+  }
+
+  function undo() {
+    if (history.length > 0) {
+      ctx.putImageData(history.pop(), 0, 0);
+    }
+  }
+
+  function clearBoard() {
+    saveState();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function setMode(newMode) {
+    mode = newMode;
+    if (mode === 'pen') {
+      penBtn.classList.add('active');
+      eraserBtn.classList.remove('active');
+    } else {
+      eraserBtn.classList.add('active');
+      penBtn.classList.remove('active');
+    }
+  }
+
+  function getCoords(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvas.width / rect.width),
+      y: (e.clientY - rect.top) * (canvas.height / rect.height),
+      pressure: e.pressure && e.pressure > 0 ? e.pressure : 0.5
+    };
+  }
+
+  function startDrawing(e) {
+    e.preventDefault();
+    saveState();
+    isDrawing = true;
+
+    const pt = getCoords(e);
+    points = [pt];
+
+    if (mode === 'pen') {
+      currentWidth = BASE_PEN_WIDTH * (0.4 + pt.pressure * 1.8);
+      ctx.strokeStyle = PEN_COLOR;
+    } else {
+      currentWidth = ERASER_WIDTH;
+      ctx.strokeStyle = PAPER_COLOR;
+    }
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+  }
+
+  function draw(e) {
+    if (!isDrawing) return;
+    e.preventDefault();
+
+    const pt = getCoords(e);
+    points.push(pt);
+
+    // Use the last 3 points to calculate a smooth curve
+    if (points.length >= 3) {
+      const p1 = points[points.length - 3];
+      const p2 = points[points.length - 2];
+      const p3 = points[points.length - 1];
+
+      const mid1 = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      const mid2 = { x: (p2.x + p3.x) / 2, y: (p2.y + p3.y) / 2 };
+
+      // Adjust line width based on pen pressure and smooth out sudden changes
+      if (mode === 'pen') {
+        const targetWidth = BASE_PEN_WIDTH * (0.4 + p2.pressure * 1.8);
+        currentWidth = (currentWidth * 0.4) + (targetWidth * 0.6);
+      } else {
+        currentWidth = ERASER_WIDTH;
+      }
+
+      ctx.beginPath();
+      ctx.moveTo(mid1.x, mid1.y);
+      ctx.quadraticCurveTo(p2.x, p2.y, mid2.x, mid2.y);
+      ctx.lineWidth = currentWidth;
+      ctx.stroke();
+    }
+  }
+
+  function stopDrawing() {
+    if (!isDrawing) return;
+
+    // Handle a single tap as a dot
+    if (points.length === 1) {
+      ctx.beginPath();
+      ctx.arc(points[0].x, points[0].y, currentWidth / 2, 0, Math.PI * 2);
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.fill();
+    } else if (points.length === 2) {
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].y);
+      ctx.lineTo(points[1].x, points[1].y);
+      ctx.lineWidth = currentWidth;
+      ctx.stroke();
+    }
+
+    isDrawing = false;
+    points = [];
+  }
+
+  canvas.addEventListener('pointerdown', startDrawing);
+  canvas.addEventListener('pointermove', draw);
+  window.addEventListener('pointerup', stopDrawing);
+
+  penBtn.addEventListener('click', () => setMode('pen'));
+  eraserBtn.addEventListener('click', () => setMode('eraser'));
+  undoBtn.addEventListener('click', undo);
+  clearBtn.addEventListener('click', clearBoard);
+
+  zoomInBtn.addEventListener('click', () => setZoom(currentZoom + 0.15));
+  zoomOutBtn.addEventListener('click', () => setZoom(currentZoom - 0.15));
+  zoomResetBtn.addEventListener('click', () => setZoom(1.0));
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Delete') {
+      clearBoard();
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+      e.preventDefault();
+      undo();
+    } else if (e.key === '+' || e.key === '=') {
+      e.preventDefault();
+      setZoom(currentZoom + 0.15);
+    } else if (e.key === '-' || e.key === '_') {
+      e.preventDefault();
+      setZoom(currentZoom - 0.15);
+    } else if (e.key === '0') {
+      e.preventDefault();
+      setZoom(1.0);
+    }
+  });
+</script>
+</body>
+</html>
